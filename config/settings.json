@@ -1,0 +1,62 @@
+{
+  "purchaseTime": "09:59:59",
+  "timezone": "Asia/Shanghai", 
+  "retryAttempts": 3,
+  "retryDelay": 1000,
+  "concurrentLimit": 10,
+  "submitConcurrency": 20,
+  "requestTimeout": 5000,
+  "ticket": {
+    "maxRequestsPerSecond": 2,
+    "retryInterval": 500,
+    "timeout": 180000
+  },
+  "levels": {
+    "300": {
+      "id": "quota_300",
+      "name": "300档补贴",
+      "amount": 300
+    },
+    "800": {
+      "id": "quota_800", 
+      "name": "800档补贴",
+      "amount": 800
+    },
+    "1500": {
+      "id": "quota_1500",
+      "name": "1500档补贴", 
+      "amount": 1500
+    },
+    "3000": {
+      "id": "quota_3000",
+      "name": "3000档补贴",
+      "amount": 3000
+    }
+  },
+  "apis": {
+    "baseUrl": "https://ai-smart-subsidy-backend.digitalhainan.com.cn",
+    "endpoints": {
+      "getApplySubsidyPositionList": "/ai-smart-subsidy-approval/api/apply/getApplySubsidyPositionList",
+      "getTicket": "/hyd-queue/core/simple/entry",
+      "validateTicket": "/ai-smart-subsidy-approval/api/queue/ticket/check",
+      "submitApplication": "/ai-smart-subsidy-approval/api/apply/submitApply"
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "appplatform": "H5"
+    }
+  },
+  "proxy": {
+    "enabled": true,
+    "apiUrl": "https://sch.shanchendaili.com/api.html?action=get_ip&key=HU027700915310840704oqdi&time=1&count=10&type=json&only=0",
+    "rotationInterval": 300000,
+    "maxRetries": 3,
+    "refreshInterval": 240000
+  },
+  "logging": {
+    "level": "info",
+    "maxFiles": 7,
+    "maxSize": "10MB"
+  }
+}

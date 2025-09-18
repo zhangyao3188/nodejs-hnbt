@@ -1,0 +1,39 @@
+{
+  "name": "subsidy-purchase-bot",
+  "version": "1.0.0",
+  "description": "多档位补贴抢购系统 - 支持多账号并发抢购",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "keywords": [
+    "purchase",
+    "bot",
+    "subsidy",
+    "concurrent",
+    "proxy"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "moment": "^2.29.4",
+    "lodash": "^4.17.21",
+    "winston": "^3.11.0",
+    "node-cron": "^3.0.3",
+    "https-proxy-agent": "^7.0.2",
+    "fs-extra": "^11.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "eslint": "^8.54.0",
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
