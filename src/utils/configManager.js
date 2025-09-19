@@ -84,19 +84,26 @@ class ConfigManager {
         }
 
         return data.accounts.map(account => {
+            // 兼容不同的字段名：token 或 grabToken
+            const token = account.grabToken || account.token;
+            
             // 验证必要字段
-            const required = ['accId', 'grabToken', 'uniqueId', 'quotas'];
+            const required = ['accId', 'uniqueId', 'quotas'];
             for (const field of required) {
                 if (!account[field]) {
                     throw new Error(`账号 ${account.name || '未知'} 缺少必要字段: ${field}`);
                 }
+            }
+            
+            if (!token) {
+                throw new Error(`账号 ${account.name || '未知'} 缺少token字段 (grabToken或token)`);
             }
 
             return {
                 username: account.name || `用户${account.uniqueId}`,
                 phone: account.phone || '',
                 accId: account.accId,
-                grabToken: account.grabToken,
+                grabToken: token,
                 uniqueId: account.uniqueId,
                 quotas: account.quotas,
                 enabled: true,

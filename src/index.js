@@ -12,6 +12,7 @@
 const path = require('path');
 const { createLogger } = require('./utils/logger');
 const ConfigManager = require('./utils/configManager');
+const successLogger = require('./utils/successLogger');
 const AccountManager = require('./modules/accountManager');
 const ProxyPool = require('./modules/proxyPool');
 const Scheduler = require('./modules/scheduler');
@@ -56,7 +57,10 @@ class PurchaseBot {
                 this.proxyPool.setExpiredCallback(() => {
                     this.logger.error('代理已过期，系统自动停止');
                     this.stop();
-                    process.exit(0);
+                    // 延迟退出，让流程有时间完成统计
+                    setTimeout(() => {
+                        process.exit(0);
+                    }, 2000);
                 });
             }
 
@@ -141,11 +145,11 @@ class PurchaseBot {
             const result = await this.purchaseFlow.executePurchase(accounts);
 
             if (result.success) {
-                this.logger.info(`抢购完成: 成功 ${result.stats.totalSuccessful}, 重复 ${result.stats.totalDuplicate}`);
+                this.logger.info(`抢购完成: 成功 ${result.stats.success}, 重复 ${result.stats.duplicate}, 失败 ${result.stats.fail}`);
                 return { 
-                    success: result.stats.totalSuccessful, 
-                    duplicate: result.stats.totalDuplicate,
-                    fail: accounts.length - result.stats.totalCompleted 
+                    success: result.stats.success, 
+                    duplicate: result.stats.duplicate,
+                    fail: result.stats.fail 
                 };
             } else {
                 this.logger.error('抢购流程执行失败:', result.error);
@@ -188,7 +192,13 @@ class PurchaseBot {
             const result = await this.executePurchase();
 
             this.logger.info('=== 抢购系统执行完成 ===');
+            
+            // 获取成功用户统计
+            const successStats = await successLogger.getSuccessStats();
+            
             this.logger.info(`最终结果: 成功 ${result.success} 个, 重复 ${result.duplicate || 0} 个, 失败 ${result.fail} 个`);
+            this.logger.info(`成功用户详情: 提交成功 ${successStats.successCount} 个, 重复提交 ${successStats.duplicateCount} 个, 总计完成 ${successStats.totalCount} 个`);
+            this.logger.info(`📄 详细的成功用户记录已保存到: logs/success-users.log`);
 
         } catch (error) {
             this.logger.error('系统运行出错:', error);

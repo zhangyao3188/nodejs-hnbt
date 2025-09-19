@@ -1,13 +1,16 @@
 {
-  "purchaseTime": "09:59:59",
+  "purchaseTime": "23:41:00",
   "timezone": "Asia/Shanghai", 
   "retryAttempts": 3,
   "retryDelay": 1000,
   "concurrentLimit": 10,
   "submitConcurrency": 20,
   "requestTimeout": 5000,
+  "submitRetryInterval": 1000,
+  "submitInterval": 200,
+  "submitTimeout": 300000,
   "ticket": {
-    "maxRequestsPerSecond": 2,
+    "maxRequestsPerSecond": 1,
     "retryInterval": 500,
     "timeout": 180000
   },
@@ -49,7 +52,7 @@
   },
   "proxy": {
     "enabled": true,
-    "apiUrl": "https://sch.shanchendaili.com/api.html?action=get_ip&key=HU027700915310840704oqdi&time=1&count=10&type=json&only=0",
+    "apiUrl": "https://sch.shanchendaili.com/api.html?action=get_ip&key=HU027700915310840704oqdi&time=1&count=60&type=json&only=0",
     "rotationInterval": 300000,
     "maxRetries": 3,
     "refreshInterval": 240000

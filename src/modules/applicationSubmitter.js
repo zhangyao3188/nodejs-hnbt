@@ -4,6 +4,7 @@
  */
 
 const { createLogger } = require('../utils/logger');
+const successLogger = require('../utils/successLogger');
 
 class ApplicationSubmitter {
     constructor(apiClient, config) {
@@ -14,6 +15,7 @@ class ApplicationSubmitter {
         // 提交状态管理
         this.accountStatuses = new Map();
         this.concurrency = config.submitConcurrency || 20;
+        this.isRunning = true; // 添加运行状态控制
         
         // 成功和重复提交的账号记录
         this.successfulAccounts = new Set();
@@ -21,7 +23,7 @@ class ApplicationSubmitter {
     }
 
     /**
-     * 为单个账号提交申请（支持多档位同步提交）
+     * 为单个账号提交申请（支持多档位同步提交和重试）
      */
     async submitForAccount(account, ticket) {
         try {
@@ -47,6 +49,7 @@ class ApplicationSubmitter {
                 return {
                     success: false,
                     error: '无可提交的档位',
+                    needRetry: false,
                     account
                 };
             }
@@ -55,21 +58,36 @@ class ApplicationSubmitter {
                 tasks: submitTasks.map(task => task.description)
             });
 
-            // 同步提交所有档位
-            const promises = submitTasks.map(task => this.executeSubmitTask(task));
-            const results = await Promise.allSettled(promises);
+            // 高并发持续提交策略：同时启动多轮提交，不等待结果
+            return await this.executeHighConcurrencySubmission(account, submitTasks);
 
-            // 处理提交结果
-            return this.processSubmitResults(account, submitTasks, results);
+            // 如果系统停止运行，返回中断状态
+            this.logger.account(account, '系统停止运行，提交中断');
+            return {
+                success: false,
+                completed: false,
+                needRetry: false,
+                error: '系统停止运行',
+                account
+            };
 
         } catch (error) {
             this.logger.account(account, '提交申请异常', { error: error.message });
             return {
                 success: false,
+                completed: false,
+                needRetry: false,
                 error,
                 account
             };
         }
+    }
+
+    /**
+     * 等待指定毫秒数
+     */
+    async sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     /**
@@ -102,6 +120,105 @@ class ApplicationSubmitter {
         }
 
         return tasks;
+    }
+
+    /**
+     * 执行高并发提交策略
+     */
+    async executeHighConcurrencySubmission(account, submitTasks) {
+        return new Promise((resolve) => {
+            let completed = false;
+            let roundCounter = 0;
+            const submitInterval = this.config.submitInterval || 200; // 每轮提交间隔(ms)
+            
+            // 处理成功结果的回调
+            const handleSuccess = (result) => {
+                if (completed) return;
+                completed = true;
+                
+                this.logger.account(account, '高并发提交成功，停止所有提交');
+                resolve({
+                    success: true,
+                    completed: true,
+                    account,
+                    result: result
+                });
+            };
+
+            // 处理ticket过期的回调
+            const handleTicketExpired = () => {
+                if (completed) return;
+                completed = true;
+                
+                this.logger.account(account, 'ticket过期，停止提交');
+                resolve({
+                    success: false,
+                    completed: false,
+                    needNewTicket: true,
+                    account
+                });
+            };
+
+            // 启动一轮提交
+            const startSubmissionRound = () => {
+                if (completed || !this.isRunning) return;
+                
+                roundCounter++;
+                this.logger.account(account, `启动第 ${roundCounter} 轮高并发提交`);
+
+                // 对每个档位同时启动提交
+                submitTasks.forEach((task) => {
+                    if (completed || !this.isRunning) return;
+                    
+                    // 异步执行，不等待结果
+                    this.executeSubmitTask(task).then((result) => {
+                        if (completed) return;
+                        
+                        if (result.success) {
+                            if (result.status === 'submitted' || result.status === 'duplicate') {
+                                handleSuccess(result);
+                                return;
+                            }
+                        }
+                        
+                        if (result.needNewTicket) {
+                            handleTicketExpired();
+                            return;
+                        }
+                        
+                        // 其他情况继续重试
+                    }).catch((error) => {
+                        // 忽略个别提交错误，继续其他提交
+                        if (!completed) {
+                            this.logger.account(account, '单次提交异常', { error: error.message });
+                        }
+                    });
+                });
+
+                // 如果还没完成，继续下一轮
+                if (!completed && this.isRunning) {
+                    setTimeout(startSubmissionRound, submitInterval);
+                }
+            };
+
+            // 立即启动第一轮提交
+            startSubmissionRound();
+
+            // 设置超时检查（避免无限等待）
+            const timeoutMs = this.config.submitTimeout || 300000; // 5分钟超时
+            setTimeout(() => {
+                if (!completed) {
+                    completed = true;
+                    this.logger.account(account, '高并发提交超时，停止提交');
+                    resolve({
+                        success: false,
+                        completed: false,
+                        error: '提交超时',
+                        account
+                    });
+                }
+            }, timeoutMs);
+        });
     }
 
     /**
@@ -197,8 +314,9 @@ class ApplicationSubmitter {
                 return {
                     success: true,
                     status: 'submitted',
-                    message: '提交成功',
+                    message: responseData.message || '提交成功',
                     code: responseData.code,
+                    requestId: responseData.requestId,
                     needRetry: false
                 };
             }
@@ -225,8 +343,9 @@ class ApplicationSubmitter {
                     return {
                         success: true, // 重复提交视为完成
                         status: 'duplicate',
-                        message: '重复提交',
+                        message: message,
                         code: code,
+                        requestId: responseData.requestId,
                         needRetry: false
                     };
                 }
@@ -291,6 +410,18 @@ class ApplicationSubmitter {
                             type: task.type,
                             quota: task.quota || 'food'
                         });
+
+                        // 记录到成功用户日志
+                        const quotaInfo = {
+                            type: task.type,
+                            quota: task.quota || 'food',
+                            subsidyId: task.subsidyId,
+                            description: task.description
+                        };
+                        successLogger.logSuccessUser(account, quotaInfo, submitResult).catch(err => {
+                            this.logger.error('记录成功用户日志失败:', err);
+                        });
+
                     } else if (submitResult.status === 'duplicate') {
                         hasDuplicate = true;
                         this.logger.info(`⚠️ 重复提交 - ${account.username} ${task.description}`, {
@@ -298,6 +429,17 @@ class ApplicationSubmitter {
                             phone: account.phone,
                             type: task.type,
                             quota: task.quota || 'food'
+                        });
+
+                        // 记录到成功用户日志
+                        const quotaInfo = {
+                            type: task.type,
+                            quota: task.quota || 'food',
+                            subsidyId: task.subsidyId,
+                            description: task.description
+                        };
+                        successLogger.logDuplicateUser(account, quotaInfo, submitResult).catch(err => {
+                            this.logger.error('记录重复用户日志失败:', err);
                         });
                     }
                 } else {
@@ -381,9 +523,11 @@ class ApplicationSubmitter {
         const retryAccounts = new Map();
         const ticketRetryAccounts = new Set();
 
-        const accounts = Array.from(accountTicketMap.keys());
-        const promises = accounts.map(async (account) => {
-            const ticketInfo = accountTicketMap.get(account);
+        // accountTicketMap的key是accId，value是{ticket, account, ...}
+        const accountIds = Array.from(accountTicketMap.keys());
+        const promises = accountIds.map(async (accId) => {
+            const ticketInfo = accountTicketMap.get(accId);
+            const account = ticketInfo.account;
             const result = await this.submitForAccount(account, ticketInfo.ticket);
 
             if (result.completed) {
@@ -401,7 +545,7 @@ class ApplicationSubmitter {
         await Promise.allSettled(promises);
 
         const stats = {
-            total: accounts.length,
+            total: accountIds.length,
             completed: completedAccounts.size,
             retry: retryAccounts.size,
             ticketRetry: ticketRetryAccounts.size,
@@ -492,12 +636,21 @@ class ApplicationSubmitter {
     }
 
     /**
+     * 停止提交器
+     */
+    stop() {
+        this.isRunning = false;
+        this.logger.info('申请提交器已停止');
+    }
+
+    /**
      * 重置状态
      */
     reset() {
         this.accountStatuses.clear();
         this.successfulAccounts.clear();
         this.duplicateSubmissions.clear();
+        this.isRunning = true;
         this.logger.info('申请提交器状态已重置');
     }
 

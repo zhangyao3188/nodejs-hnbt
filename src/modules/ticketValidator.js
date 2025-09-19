@@ -101,9 +101,11 @@ class TicketValidator {
         const validatedAccounts = new Map(); // 校验通过的账号
         const retryAccounts = new Set(); // 需要重新获取ticket的账号
 
-        const accounts = Array.from(accountTicketMap.keys());
-        const promises = accounts.map(async (account) => {
-            const ticketInfo = accountTicketMap.get(account);
+        // accountTicketMap的key是accId，value是{ticket, account, ...}
+        const accountIds = Array.from(accountTicketMap.keys());
+        const promises = accountIds.map(async (accId) => {
+            const ticketInfo = accountTicketMap.get(accId);
+            const account = ticketInfo.account;
             const result = await this.validateTicketForAccount(account, ticketInfo.ticket);
 
             if (result.valid) {
@@ -125,7 +127,7 @@ class TicketValidator {
         await Promise.allSettled(promises);
 
         const stats = {
-            total: accounts.length,
+            total: accountIds.length,
             validated: validatedAccounts.size,
             retry: retryAccounts.size
         };
@@ -150,21 +152,31 @@ class TicketValidator {
             }
 
             // 记录完整的响应用于调试
-            this.logger.account(account, '校验响应详情', {
+            this.logger.account(account, '校验响应解析', {
                 success: responseData.success,
                 code: responseData.code,
                 message: responseData.message,
-                requestId: responseData.requestId
+                data: responseData.data,
+                requestId: responseData.requestId,
+                debugMessage: responseData.debugMessage
             });
 
             // 判断校验是否通过
-            // success !== false 表示校验通过
-            if (responseData.success !== false) {
+            // success === true 表示校验通过，success === false 表示校验失败
+            if (responseData.success === true) {
+                this.logger.account(account, '✅ ticket校验通过');
                 return true;
-            } else {
-                this.logger.account(account, '校验失败详情', {
+            } else if (responseData.success === false) {
+                this.logger.account(account, '❌ ticket校验失败', {
                     code: responseData.code,
                     message: responseData.message
+                });
+                return false;
+            } else {
+                // success字段不是boolean，可能是其他状态
+                this.logger.account(account, '⚠️ ticket校验响应异常', {
+                    success: responseData.success,
+                    type: typeof responseData.success
                 });
                 return false;
             }

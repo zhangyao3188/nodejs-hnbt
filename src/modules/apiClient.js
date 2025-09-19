@@ -6,6 +6,7 @@
 const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { createLogger } = require('../utils/logger');
+const apiLogger = require('../utils/apiLogger');
 
 class ApiClient {
     constructor(proxyPool, config) {
@@ -75,14 +76,25 @@ class ApiClient {
             try {
                 const client = this.createClient(account, options.useProxy !== false);
                 
+                // 构建完整的请求配置，包括默认headers
+                const fullOptions = {
+                    ...options,
+                    headers: {
+                        ...this.defaultHeaders,
+                        'Uid': account.accId,
+                        'Authorization': `Bearer ${account.grabToken}`,
+                        ...options.headers
+                    }
+                };
+                
                 this.logger.info(`请求开始 [${attempt}/${retries}]`, {
                     account: account.username,
-                    method: options.method || 'GET',
-                    url: options.url
+                    method: fullOptions.method || 'GET',
+                    url: fullOptions.url
                 });
 
                 const startTime = Date.now();
-                const response = await client.request(options);
+                const response = await client.request(fullOptions);
                 const duration = Date.now() - startTime;
 
                 this.logger.info(`请求完成`, {
@@ -91,6 +103,9 @@ class ApiClient {
                     duration: `${duration}ms`,
                     attempt
                 });
+
+                // 记录API原始回参到专门的日志文件
+                await this.logApiResponse(account, fullOptions, response, duration, true);
 
                 // 检查响应
                 if (response.status === 200) {
@@ -106,6 +121,19 @@ class ApiClient {
 
             } catch (error) {
                 lastError = error;
+                
+                // 记录失败的API调用  
+                const fullOptions = {
+                    ...options,
+                    headers: {
+                        ...this.defaultHeaders,
+                        'Uid': account.accId,
+                        'Authorization': `Bearer ${account.grabToken}`,
+                        ...options.headers
+                    }
+                };
+                await this.logApiResponse(account, fullOptions, null, 0, false, error);
+                
                 this.logger.warn(`请求失败 [${attempt}/${retries}]`, {
                     account: account.username,
                     error: error.message,
@@ -161,13 +189,46 @@ class ApiClient {
      * 校验票据
      */
     async validateTicket(account, ticket) {
+        const requestData = {
+            ticket: ticket
+        };
+
+        // 获取请求头
+        const headers = {
+            ...this.defaultHeaders,
+            'Uid': account.accId,
+            'Authorization': `Bearer ${account.grabToken}`
+        };
+
         const options = {
             method: 'POST',
             url: this.config.apis.endpoints.validateTicket,
-            data: ticket
+            data: requestData,
+            headers: headers
         };
 
-        return await this.makeRequest(account, options);
+        this.logger.info(`ticket校验请求详情`, {
+            account: account.username,
+            accId: account.accId,
+            hasGrabToken: !!account.grabToken,
+            grabTokenPreview: account.grabToken ? account.grabToken.substring(0, 20) + '...' : 'undefined',
+            url: `${this.baseURL}${this.config.apis.endpoints.validateTicket}`,
+            method: 'POST',
+            headers: headers,
+            requestData: requestData
+        });
+
+        const result = await this.makeRequest(account, options);
+
+        this.logger.info(`ticket校验响应详情`, {
+            account: account.username,
+            success: result.success,
+            status: result.status || 'unknown',
+            responseData: result.data,
+            error: result.error?.message || null
+        });
+
+        return result;
     }
 
     /**
@@ -177,9 +238,13 @@ class ApiClient {
         const requestData = {
             ticket: ticket,
             uniqueId: account.uniqueId,
-            tourismSubsidyId: tourismSubsidyId,
-            foodSubsidyId: foodSubsidyId
+            tourismSubsidyId: tourismSubsidyId
         };
+
+        // 只有当foodSubsidyId有值时才添加该属性
+        if (foodSubsidyId !== null && foodSubsidyId !== undefined) {
+            requestData.foodSubsidyId = foodSubsidyId;
+        }
 
         const options = {
             method: 'POST',
@@ -233,6 +298,40 @@ class ApiClient {
                 error: error.message,
                 proxy: useProxy ? '已启用' : '未启用'
             };
+        }
+    }
+
+    /**
+     * 记录API调用到专门的日志文件
+     */
+    async logApiResponse(account, options, response, duration, success, error = null) {
+        try {
+            const requestInfo = {
+                url: `${this.baseURL}${options.url}`,
+                method: options.method || 'GET',
+                headers: options.headers || {},
+                data: options.data || null
+            };
+
+            const responseInfo = response ? {
+                status: response.status,
+                headers: response.headers,
+                data: response.data,
+                duration
+            } : null;
+
+            // 根据不同的API端点调用不同的日志方法
+            if (options.url.includes('/hyd-queue/core/simple/entry')) {
+                await apiLogger.logTicketAcquisition(account, requestInfo, responseInfo, success, error);
+            } else if (options.url.includes('/ai-smart-subsidy-approval/api/queue/ticket/check')) {
+                await apiLogger.logTicketValidation(account, requestInfo, responseInfo, success, error);
+            } else if (options.url.includes('/ai-smart-subsidy-approval/api/apply/submitApply')) {
+                await apiLogger.logApplicationSubmission(account, requestInfo, responseInfo, success, error);
+            } else if (options.url.includes('/ai-smart-subsidy-approval/api/apply/getApplySubsidyPositionList')) {
+                await apiLogger.logPreWork(account, requestInfo, responseInfo, success, error);
+            }
+        } catch (logError) {
+            this.logger.error('记录API日志失败:', logError);
         }
     }
 }
