@@ -1,5 +1,5 @@
 {
-  "purchaseTime": "23:41:00",
+  "purchaseTime": "09:59:59",
   "timezone": "Asia/Shanghai", 
   "retryAttempts": 3,
   "retryDelay": 1000,
@@ -52,7 +52,7 @@
   },
   "proxy": {
     "enabled": true,
-    "apiUrl": "https://sch.shanchendaili.com/api.html?action=get_ip&key=HU027700915310840704oqdi&time=1&count=60&type=json&only=0",
+    "apiUrl": "https://sch.shanchendaili.com/api.html?action=get_ip&key=HU027700915310840704oqdi&time=5&count=70&type=json&only=0",
     "rotationInterval": 300000,
     "maxRetries": 3,
     "refreshInterval": 240000
